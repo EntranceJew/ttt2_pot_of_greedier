@@ -246,7 +246,7 @@ PotOfGreedier.Proto.ModeData = {
 	-- filter_kinds_like = -1,
 	filter_credits = true,
 	filter_owned = true,
-	filter_buyable = false,
+	filter_buyable = true,
 	filter_ids = {"weapon_ttt_potofgreedier"},
 }
 
@@ -255,20 +255,16 @@ PotOfGreedier.Proto.ModeData = {
 ---@field fluke boolean
 ---@field role number|ROLE
 ---@field inventory Weapon[]
----@field credits_available number
 ---@field credits_budget number
 ---@field is_purchase boolean
----@field is_free boolean
 ---@field modes ModeData
 PotOfGreedier.Proto.BuyArgs = {
 	ply = nil,
 	fluke = false,
-	role = ROLE_INNOCENT,
+	-- role = ROLE_DETECTIVE,
 	inventory = {},
-	credits_available = math.huge,
 	credits_budget = math.huge,
 	is_purchase = false,
-	is_free = false,
 	modes = table.Copy(PotOfGreedier.Proto.ModeData),
 }
 
@@ -323,18 +319,23 @@ PotOfGreedier.FilterAllModes = function(buyargs, equipmentTable)
 			if tovar.debug then print("filtering out", class, equipment, "owned") end
 			continue
 		end
-		if buyargs.modes.filter_buyable and (not EquipmentIsBuyable(equipment, buyargs.ply)
-			or not hook.Run("TTTCanOrderEquipment", buyargs.ply, class, isItem)
-			or hook.Run("TTT2CanOrderEquipment", buyargs.ply, class, isItem, equipment.credits or 1) == false) then
-			if tovar.debug then print("filtering out", class, equipment, "not buyable") end
-			continue
+		if buyargs.modes.filter_buyable then
+			-- local eib = not EquipmentIsBuyable(equipment, buyargs.ply)
+			local eib = false
+			local coe = not hook.Run("TTTCanOrderEquipment", buyargs.ply, class, isItem)
+			local coe2 = hook.Run("TTT2CanOrderEquipment", buyargs.ply, class, isItem, equipment.credits or 1) == false
+			if tovar.debug then print("eib", eib, "coe", coe, "coe2", coe2) end
+			if eib or coe or coe2 then
+				if tovar.debug then print("filtering out", class, equipment, "not buyable") end
+				continue
+			end
 		end
 		if buyargs.modes.filter_ids and table.HasValue(buyargs.modes.filter_ids, class) then
 			if tovar.debug then print("filtering out", class, equipment, "blacklisted item name") end
 			continue
 		end
 
-		-- if tovar.debug then print("filter in", equipment.kind, class) end
+		if tovar.debug then print("filter in", equipment.kind, class) end
 		table.insert(newEquipmentTable, equipment)
 	end
 	-- if tovar.debug then PrintTable(newEquipmentTable) end
@@ -346,7 +347,10 @@ end
 ---@param buyargs BuyArgs
 ---@return boolean
 PotOfGreedier.PurchaseStrategy = function(buyargs)
-	if not IsValid(buyargs.ply) then return false end
+	if not IsValid(buyargs.ply) then
+		if tovar.debug then print("no purchase, invalid player", buyargs.ply) end
+		return false
+	end
 
 	-- print("PotOfGreedier: PurchaseStrategy")
 	-- PrintTable(buyargs)
@@ -356,8 +360,10 @@ PotOfGreedier.PurchaseStrategy = function(buyargs)
 		-- equipmentTable = GetEquipmentForRole(buyargs.ply, buyargs.role, false)
 	-- else
 	equipmentTable = PotOfGreedier.GetEquipmentServerSided(buyargs.ply, buyargs.role, false)
+	if tovar.debug then print("equipment count pre-filter", #equipmentTable) end
 	-- end
 	equipmentTable = PotOfGreedier.FilterAllModes(buyargs, equipmentTable)
+	if tovar.debug then print("equipment count post-filter", #equipmentTable) end
 
 	local total = PotOfGreedier.CVARS.weapon_items_to_give:GetInt()
 	if buyargs.fluke then
@@ -389,6 +395,7 @@ PotOfGreedier.PurchaseStrategy = function(buyargs)
 			equipmentTable = PotOfGreedier.FilterAllModes(buyargs, equipmentTable)
 			buyargs = PotOfGreedier.GetBuyArgs(buyargs)
 		else
+			if tovar.debug then print("no purchase, equipment table blanked") end
 			return false
 		end
 	end
@@ -402,9 +409,11 @@ end
 
 PotOfGreedier.GetEquipmentServerSided = function(ply, subrole, noModification)
 	local fallbackTable = GetShopFallbackTable(subrole)
+	-- PrintTable(fallbackTable)
 
 	if not noModification then
 		fallbackTable = GetModifiedEquipment(ply, fallbackTable)
+		-- PrintTable(fallbackTable)
 	end
 
 	if fallbackTable then
@@ -412,6 +421,7 @@ PotOfGreedier.GetEquipmentServerSided = function(ply, subrole, noModification)
 	end
 
 	local fallback = GetShopFallback(subrole)
+	-- PrintTable(fallback)
 
 	Equipment = Equipment or {}
 
@@ -499,10 +509,12 @@ PotOfGreedier.GetBuyArgs = function(plyOrBuyargs, ent)
 	if plyOrBuyargs.IsPlayer and plyOrBuyargs:IsPlayer() then
 		buyargs = table.Copy(PotOfGreedier.Proto.BuyArgs) --[[@as BuyArgs]]
 		buyargs.ply = plyOrBuyargs --[[@as Player]]
-		buyargs.role = buyargs.ply:GetSubRole()
-		if ent then
-			buyargs.fluke = ent.Fluke or false
-			buyargs.role = ent.Role or buyargs.role
+		if ent and ent.GetClass and ent:GetClass() == "ttt_potofgreedier" then
+			buyargs.fluke = ent:GetFluke()
+			buyargs.role = ent:GetRole()
+		else
+			-- print("some other entity was here?", ent)
+			buyargs.role = buyargs.ply:GetSubRole()
 		end
 	else
 		buyargs = plyOrBuyargs --[[@as BuyArgs]]
@@ -514,19 +526,14 @@ PotOfGreedier.GetBuyArgs = function(plyOrBuyargs, ent)
 
 	if PotOfGreedier.CVARS.weapon_credits_use_balance:GetBool() then
 		buyargs.is_purchase = true
-		buyargs.is_free = false
 	end
 
 	if buyargs.is_purchase then
-		buyargs.credits_available = buyargs.ply:GetCredits()
 		buyargs.credits_budget = buyargs.ply:GetCredits()
 	end
 
 	-- both case:
 	buyargs.inventory = buyargs.ply:GetWeapons()
-
-	--@TODO: influence this
-	-- buyargs.credits_available = PotOfGreedier.CVARS.max_credits:GetInt()
 
 	return buyargs --[[@as BuyArgs]]
 end
@@ -540,6 +547,7 @@ PotOfGreedier.GatchaPull = function(ply, ent)
 	-- return PotOfGreedier.PickAndGiveRandomEquipFromTable(swep, ply)
 
 	local buyargs = PotOfGreedier.GetBuyArgs(ply, ent)
+	-- PrintTable(buyargs)
 	return PotOfGreedier.PurchaseStrategy(buyargs)
 end
 
@@ -548,10 +556,8 @@ PotOfGreedier.SpendAvailableCredits = function(len, ply)
 		local buyargs = table.Copy(PotOfGreedier.Proto.BuyArgs)
 		buyargs.ply = ply
 		buyargs.role = ply:GetSubRole()
-		buyargs.is_free = false
 		buyargs.is_purchase = true
 		buyargs.credits_budget = buyargs.ply:GetCredits()
-		buyargs.credits_available = buyargs.ply:GetCredits()
 		buyargs = PotOfGreedier.GetBuyArgs(buyargs)
 		-- print("SpendClientCredits")
 		-- PrintTable(buyargs)
@@ -575,7 +581,11 @@ end
 ---@param ply Player
 PotOfGreedier.SpawnPot = function(ply)
 	local pot = ents.Create("ttt_potofgreedier")
-	pot.Role = ply:GetSubRole()
+	if ply:IsShopper() then
+		pot:SetRole( ply:GetSubRole() )
+	else
+		pot:SetRole( ROLE_DETECTIVE )
+	end
 
 	if IsValid(pot) and IsValid(ply) then
 		local vsrc = ply:GetShootPos()
@@ -591,8 +601,8 @@ PotOfGreedier.SpawnPot = function(ply)
 			phys:SetMass(tovar.pot_mass)
 		end
 
-		pot.Fluke = PotOfGreedier.RollFlukeChance()
-		PotOfGreedier.PlaySound(ply, "deploy" .. (pot.Fluke and "_fluke" or ""))
+		pot:SetFluke( PotOfGreedier.RollFlukeChance() )
+		PotOfGreedier.PlaySound(ply, "deploy" .. (pot:GetFluke() and "_fluke" or ""))
 	end
 end
 
@@ -659,6 +669,7 @@ PotOfGreedier.SpewShards = function(ent)
 	if ent:IsPlayer() then
 		quantity = ent:GetNW2Var("ttt_shardofgreed_count", 0)
 		ent:SetNW2Var("ttt_shardofgreed_count", 0)
+		is_global = false
 	end
 	if is_global then
 		PotOfGreedier.DistributeShards(quantity)
@@ -682,7 +693,7 @@ PotOfGreedier.DistributeShards = function(quantity)
 		local index = math.random(#spawns)
 		local spwn = spawns[index]
 
-		print("spice girls", spwn, quantity, index)
+		--print("spice girls", spwn, quantity, index)
 		PotOfGreedier.SpawnShard(spwn)
 		table.remove(spawns, index)
 	end

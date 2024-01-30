@@ -3,8 +3,18 @@ AddCSLuaFile()
 ENT.Type = "anim"
 
 ENT.NextUse = 0
-ENT.Role = ROLE_NONE
+ENT.Role = ROLE_DETECTIVE
 local prompt
+
+function ENT:SetupDataTables()
+	self:NetworkVar( "Int", 0, "Role" )
+	self:NetworkVar( "Bool", 0, "Fluke" )
+
+	if SERVER then
+		self:SetRole( ROLE_DETECTIVE )
+		self:SetFluke( false )
+	end
+end
 
 function ENT:Initialize()
 	self:SetModel("models/prawnmodels/yugioh!md/mates/potofgreed.mdl")
@@ -15,7 +25,11 @@ function ENT:Initialize()
 
 	if SERVER then
 		self:NextThink(CurTime() + 1.5)
-
+		local phys = self:GetPhysicsObject()
+		if IsValid(phys) then
+			-- print(phys, phys:GetMass())
+			phys:SetMass(CARRY_WEIGHT_LIMIT - 1)
+		end
 	end
 end
 
@@ -94,7 +108,7 @@ function ENT:UseSuccess(ply)
 	-- sound.Play("ambient/levels/labs/electric_explosion3.wav", pos)
 	if SERVER then
 		PotOfGreedier.SpewShards(self)
-		PotOfGreedier.PlaySound(self, "activate"  .. (self.Fluke and "_fluke" or ""))
+		PotOfGreedier.PlaySound(self, "activate"  .. (self:GetFluke() and "_fluke" or ""))
 	end
 	-- sound.Play(string.format("ttt2_potofgreedier/activate/activate_%02d.wav", math.random(1,PotOfGreedier.ToVAR.pot_max_activate_sounds)), pos)
 end

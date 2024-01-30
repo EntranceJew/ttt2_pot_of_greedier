@@ -30,6 +30,11 @@ function ENT:Think()
 	if (not self.Solidified and CurTime() > self.SpawnTime) then
 		self:SetCollisionGroup(COLLISION_GROUP_NONE)
 		self.Solidified = true
+		local phys = self:GetPhysicsObject()
+		if IsValid(phys) then
+			-- print(phys, phys:GetMass())
+			phys:SetMass(CARRY_WEIGHT_LIMIT - 1)
+		end
 	end
 end
 
